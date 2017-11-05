@@ -3,12 +3,13 @@
 # TDA596 Labs - Server Skeleton
 # server/server.py
 # Input: Node_ID total_number_of_ID
-# Student Group:
-# Student names: John Doe & John Doe
+# Student Group: Group 13
+# Student names: Ludovic Giry & Benoit Zhong
 #------------------------------------------------------------------------------------------------------
 # We import various libraries
 from BaseHTTPServer import HTTPServer, BaseHTTPRequestHandler # Socket specifically designed to handle HTTP requests
 import sys # Retrieve arguments
+import os # Paths to HTML files
 from urlparse import parse_qs # Parse POST data
 from httplib import HTTPConnection # Create a HTTP connection, as a client (for POST requests to the other vessels)
 from urllib import urlencode # Encode POST content into the HTTP header
@@ -17,10 +18,12 @@ from threading import  Thread # Thread Management
 #------------------------------------------------------------------------------------------------------
 
 # Global variables for HTML templates
-board_frontpage_footer_template = ""
-board_frontpage_header_template = ""
-boardcontents_template = ""
-entry_template = ""
+script_dir = os.path.dirname(__file__)
+if script_dir == "": script_dir="."
+board_frontpage_footer_template = open(script_dir + "/board_frontpage_footer_template.html","r").read() % "Ludovic Giry & Benoit Zhong (benoitz@student.chalmers.se) - Group 13"
+board_frontpage_header_template = open(script_dir + "/board_frontpage_header_template.html","r").read()
+boardcontents_template = open(script_dir + "/boardcontents_template.html","r").read()
+entry_template = open(script_dir + "/entry_template.html","r").read()
 
 #------------------------------------------------------------------------------------------------------
 # Static variables definitions
@@ -48,8 +51,9 @@ class BlackboardServer(HTTPServer):
 #------------------------------------------------------------------------------------------------------
 	# We add a value received to the store
 	def add_value_to_store(self, value):
-		# We add the value to the store
-		pass
+		self.current_key += 1
+		self.store[self.current_key] = value
+
 #------------------------------------------------------------------------------------------------------
 	# We modify a value received in the store
 	def modify_value_in_store(self,key,value):
@@ -73,7 +77,7 @@ class BlackboardServer(HTTPServer):
 		try:
 			# We contact vessel:PORT_NUMBER since we all use the same port
 			# We can set a timeout, after which the connection fails if nothing happened
-			connection = HTTPConnection("%s:%d" % (vessel, PORT_NUMBER), timeout = 30)
+			connection = HTTPConnection("%s:%d" % (vessel_ip, PORT_NUMBER), timeout = 30)
 			# We only use POST to send data (PUT and DELETE not supported)
 			action_type = "POST"
 			# We send the HTTP request
@@ -87,7 +91,7 @@ class BlackboardServer(HTTPServer):
 				success = True
 		# We catch every possible exceptions
 		except Exception as e:
-			print "Error while contacting %s" % vessel
+			print "Error while contacting %s" % vessel_ip
 			# printing the error given by Python
 			print(e)
 
@@ -130,7 +134,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 #------------------------------------------------------------------------------------------------------
 	# a POST request must be parsed through urlparse.parse_QS, since the content is URL encoded
 	def parse_POST_request(self):
-		post_data = ""
+		post_data = self.path
 		# We need to parse the response, so we must know the length of the content
 		length = int(self.headers['Content-Length'])
 		# we can now parse the content using parse_qs
@@ -146,7 +150,10 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 	def do_GET(self):
 		print("Receiving a GET on path %s" % self.path)
 		# Here, we should check which path was requested and call the right logic based on it
-		self.do_GET_Index()
+		if self.path == "/board":
+			self.do_GET_Board()
+		else:
+			self.do_GET_Index()
 #------------------------------------------------------------------------------------------------------
 # GET logic - specific path
 #------------------------------------------------------------------------------------------------------
@@ -154,12 +161,30 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		# We set the response status code to 200 (OK)
 		self.set_HTTP_headers(200)
 		# We should do some real HTML here
-		html_reponse = "<html><head><title>Basic Skeleton</title></head><body>This is the basic HTML content when receiving a GET</body></html>"
+		# html_response = "<html><head><title>Basic Skeleton</title></head><body>This is the basic HTML content when receiving a GET</body></html>"
 		#In practice, go over the entries list, 
 		#produce the boardcontents part, 
 		#then construct the full page by combining all the parts ...
+
+		html_response = board_frontpage_header_template + self.generate_entries() + board_frontpage_footer_template
 		
-		self.wfile.write(html_reponse)
+		self.wfile.write(html_response)
+
+	def do_GET_Board(self):
+		# We set the response status code to 200 (OK)
+		self.set_HTTP_headers(200)
+
+		# We send back the entries
+		self.wfile.write(self.generate_entries())
+
+	def generate_entries(self):
+		entries = ""
+		for entryId in self.server.store.keys():
+			entries += entry_template % ("entries/"+str(entryId),entryId,self.server.store[entryId])
+		board = boardcontents_template % ("Sample board @ 10.0.1."+str(self.server.vessel_id) + ". Up time: Not implemented",entries)
+		return board
+
+
 #------------------------------------------------------------------------------------------------------
 	# we might want some other functions
 #------------------------------------------------------------------------------------------------------
@@ -172,14 +197,36 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		# We should also parse the data received
 		# and set the headers for the client
 
+		retransmit = False # Like this, we won't create infinite loops!
+		# Var initialization for propagation
+		action = ""
+		key = -1
+		value = ""
+
+		parsed = self.parse_POST_request() # Parsing data
+		print(parsed)
+
+		if self.path == "/entries" and "entry" in parsed: # Adding entry from this server
+			retransmit = True # Propagate
+			action = "ADD"
+			value = parsed['entry'][0]
+			self.server.add_value_to_store(value) # Adding entry to server
+			self.set_HTTP_headers(200)
+		elif self.path == "/entries" and "action" in parsed and "value" in parsed and parsed['action'][0] == "ADD" : # Entry added by another server
+			print("Adding entry")
+			self.server.add_value_to_store(parsed['value'][0]) 
+			self.set_HTTP_headers(200)
+		else:
+			self.set_HTTP_headers(400)
+		
 		# If we want to retransmit what we received to the other vessels
-		retransmit = False # Like this, we will just create infinite loops!
+		
 		if retransmit:
 			# do_POST send the message only when the function finishes
 			# We must then create threads if we want to do some heavy computation
 			# 
 			# Random content
-			thread = Thread(target=self.server.propagate_value_to_vessels,args=("action", "key", "value") )
+			thread = Thread(target=self.server.propagate_value_to_vessels,args=(self.path, action, key, value) )
 			# We kill the process if we kill the server
 			thread.daemon = True
 			# We start the thread
