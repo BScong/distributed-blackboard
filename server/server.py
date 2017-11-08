@@ -58,11 +58,14 @@ class BlackboardServer(HTTPServer):
 	# We modify a value received in the store
 	def modify_value_in_store(self,key,value):
 		# we modify a value in the store if it exists
-		pass
+		if key in self.store:
+			self.store[key]=value
 #------------------------------------------------------------------------------------------------------
 	# We delete a value received from the store
 	def delete_value_in_store(self,key):
 		# we delete a value in the store if it exists
+		if key in self.store:
+			del self.store[key]
 		pass
 #------------------------------------------------------------------------------------------------------
 # Contact a specific vessel with a set of variables to transmit to it
@@ -206,15 +209,41 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		parsed = self.parse_POST_request() # Parsing data
 		print(parsed)
 
+		# Self cases
 		if self.path == "/entries" and "entry" in parsed: # Adding entry from this server
 			retransmit = True # Propagate
 			action = "ADD"
 			value = parsed['entry'][0]
 			self.server.add_value_to_store(value) # Adding entry to server
 			self.set_HTTP_headers(200)
+		elif "/entries" in self.path and "entry" in parsed and "delete" in parsed and parsed['delete'][0]=='0':
+			retransmit = True
+			action = "MOD"
+			value = parsed['entry'][0]
+			key = int(self.path.replace("/entries/",""))
+			self.server.modify_value_in_store(key,value)
+			self.set_HTTP_headers(200)
+		elif "/entries" in self.path and "delete" in parsed and parsed['delete'][0]=='1':
+			retransmit = True
+			action = "DEL"
+			key = int(self.path.replace("/entries/",""))
+			self.server.delete_value_in_store(key)
+			self.set_HTTP_headers(200)
+
+		# Propagate cases
 		elif self.path == "/entries" and "action" in parsed and "value" in parsed and parsed['action'][0] == "ADD" : # Entry added by another server
 			print("Adding entry")
 			self.server.add_value_to_store(parsed['value'][0]) 
+			self.set_HTTP_headers(200)
+		elif "/entries" in self.path and "action" in parsed and "key" in parsed and "value" in parsed and parsed['action'][0] == "MOD" :
+			print("Modifying entry")
+			key = int(self.path.replace("/entries/","")) #int(parsed['key'][0])
+			self.server.modify_value_in_store(key,parsed['value'][0]) 
+			self.set_HTTP_headers(200)
+		elif "/entries" in self.path and "action" in parsed and "key" in parsed and parsed['action'][0] == "DEL" :
+			print("Deleting entry")
+			key = int(self.path.replace("/entries/","")) #int(parsed['key'][0])
+			self.server.delete_value_in_store(key) 
 			self.set_HTTP_headers(200)
 		else:
 			self.set_HTTP_headers(400)

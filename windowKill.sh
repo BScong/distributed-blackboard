@@ -1,0 +1,1 @@
+xdotool search "vessel" windowkill %@
