@@ -32,7 +32,6 @@ PORT_NUMBER = 80
 
 
 
-
 #------------------------------------------------------------------------------------------------------
 #------------------------------------------------------------------------------------------------------
 class BlackboardServer(HTTPServer):
@@ -184,7 +183,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		entries = ""
 		for entryId in self.server.store.keys():
 			entries += entry_template % ("entries/"+str(entryId),entryId,self.server.store[entryId])
-		board = boardcontents_template % ("Sample board @ 10.0.1."+str(self.server.vessel_id) + ". Up time: Not implemented",entries)
+		board = boardcontents_template % ("Sample board @ 10.0.1."+str(self.server.vessel_id) + ".",entries)
 		return board
 
 
@@ -235,14 +234,14 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 			print("Adding entry")
 			self.server.add_value_to_store(parsed['value'][0]) 
 			self.set_HTTP_headers(200)
-		elif "/entries" in self.path and "action" in parsed and "key" in parsed and "value" in parsed and parsed['action'][0] == "MOD" :
+		elif self.path == "/entries" and "action" in parsed and "key" in parsed and "value" in parsed and parsed['action'][0] == "MOD" :
 			print("Modifying entry")
-			key = int(self.path.replace("/entries/","")) #int(parsed['key'][0])
+			key = int(parsed['key'][0])
 			self.server.modify_value_in_store(key,parsed['value'][0]) 
 			self.set_HTTP_headers(200)
-		elif "/entries" in self.path and "action" in parsed and "key" in parsed and parsed['action'][0] == "DEL" :
+		elif self.path == "/entries" and "action" in parsed and "key" in parsed and parsed['action'][0] == "DEL" :
 			print("Deleting entry")
-			key = int(self.path.replace("/entries/","")) #int(parsed['key'][0])
+			key = int(parsed['key'][0])
 			self.server.delete_value_in_store(key) 
 			self.set_HTTP_headers(200)
 		else:
@@ -255,7 +254,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 			# We must then create threads if we want to do some heavy computation
 			# 
 			# Random content
-			thread = Thread(target=self.server.propagate_value_to_vessels,args=(self.path, action, key, value) )
+			thread = Thread(target=self.server.propagate_value_to_vessels,args=("/entries", action, key, value) )
 			# We kill the process if we kill the server
 			thread.daemon = True
 			# We start the thread
