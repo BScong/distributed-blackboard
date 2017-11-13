@@ -36,7 +36,7 @@ PORT_NUMBER = 80
 #------------------------------------------------------------------------------------------------------
 class BlackboardServer(HTTPServer):
 #------------------------------------------------------------------------------------------------------
-	def __init__(self, server_address, handler, node_id, vessel_list):
+	def __init__(self, server_address, handler, vessel_id, vessel_list):
 	# We call the super init
 		HTTPServer.__init__(self,server_address, handler)
 		# we create the dictionary of values
