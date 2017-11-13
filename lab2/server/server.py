@@ -308,7 +308,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 			self.server.delete_value_in_store(key)
 
 
-	# Vessel POST Logic (Task 1)
+	# Vessel POST Logic (Task 1 - propagate version)
 	def do_POST_entries_vessel(self, action, key, value, propagate):
 		if action == "ADD" : # Entry added by another server
 			print("Adding entry")
@@ -329,6 +329,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 			# We start the thread
 			thread.start() 
 
+	# Extracting parameters from the parsed structure
 	def get_entries_parameters(self, params):
 		action, key, value, propagate = "",-1,"",True
 
@@ -349,6 +350,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 
 		return action, key, value, propagate
 
+	# Test the parameters to see if they are valid (No incorrect values or incorrect combinations)
 	def are_parameters_valid(self, action, key, value):
 		if action=="ADD" and value!="":
 			return True
