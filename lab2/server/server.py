@@ -15,6 +15,7 @@ from httplib import HTTPConnection # Create a HTTP connection, as a client (for 
 from urllib import urlencode # Encode POST content into the HTTP header
 from codecs import open # Open a file
 from threading import  Thread # Thread Management
+import time
 #------------------------------------------------------------------------------------------------------
 
 # Global variables for HTML templates
@@ -44,11 +45,26 @@ class BlackboardServer(HTTPServer):
 		# We keep a variable of the next id to insert
 		self.current_key = -1
 		# our own ID (IP is 10.1.0.ID)
-		self.vessel_id = vessel_id
+		self.vessel_id = vessel_id #"10.1.0."+vessel_id
 		# The list of other vessels
 		self.vessels = vessel_list
 		# The leader id
 		self.leader_id = 3
+
+		self.neighbor_id = (self.vessel_id+1)%len(vessel_list)
+
+		thread = Thread(target=self.elect_leader,args=() )
+		# We kill the process if we kill the server
+		thread.daemon = True
+		# We start the thread
+		thread.start()
+		
+	def elect_leader(self):
+		time.sleep(1)
+		print("Contacting vessel...")
+		res = self.contact_vessel("10.1.0."+str(self.neighbor_id), "/election", "ELEC", self.vessel_id, "test")
+		print("Vessel contacted...")
+		print(res)
 #------------------------------------------------------------------------------------------------------
 	# We add a value received to the store - This function is only used by the leader
 	def add_value_to_store(self, value):
@@ -233,10 +249,12 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 
 		# Check if the path is correct
 		valid_path_entries = True if "/entries" in self.path else False
+		valid_path_election = True if "/election" in self.path else False
 		
 		if valid_path_entries:
 			self.do_POST_entries(parsed)
-		# TODO : Here we must implement the POST Logic for the Leader Election
+		elif valid_path_election:
+			self.do_POST_election(parsed)
 		else:
 			self.set_HTTP_headers(400)
 #------------------------------------------------------------------------------------------------------
@@ -329,6 +347,10 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 			# We start the thread
 			thread.start() 
 
+	def do_POST_election(self, parsed):
+		# POST ELECTION LOGIC
+		pass
+
 	# Extracting parameters from the parsed structure
 	def get_entries_parameters(self, params):
 		action, key, value, propagate = "",-1,"",True
@@ -349,6 +371,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 				action = "ADD"
 
 		return action, key, value, propagate
+
 
 	# Test the parameters to see if they are valid (No incorrect values or incorrect combinations)
 	def are_parameters_valid(self, action, key, value):
