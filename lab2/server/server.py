@@ -55,18 +55,6 @@ class BlackboardServer(HTTPServer):
 
 		self.neighbor_id = (self.vessel_id+1)%len(vessel_list)
 
-		thread = Thread(target=self.elect_leader,args=() )
-		# We kill the process if we kill the server
-		thread.daemon = True
-		# We start the thread
-		thread.start()
-		
-	def elect_leader(self):
-		time.sleep(1)
-		print("Contacting vessel...")
-		res = self.contact_vessel("10.1.0."+str(self.neighbor_id), "/election", "ELEC", self.vessel_id, "test")
-		print("Vessel contacted...")
-		print(res)
 #------------------------------------------------------------------------------------------------------
 	# We add a value received to the store - This function is only used by the leader
 	def add_value_to_store(self, value):
