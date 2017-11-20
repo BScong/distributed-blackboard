@@ -50,6 +50,8 @@ class BlackboardServer(HTTPServer):
 		self.vessels = vessel_list
 		# The leader id
 		self.leader_id = 3
+		# Random number generated
+		self.random = 548
 
 		self.neighbor_id = (self.vessel_id+1)%len(vessel_list)
 
@@ -234,7 +236,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		entries = ""
 		for entryId in self.server.store.keys():
 			entries += entry_template % ("entries/"+str(entryId),entryId,self.server.store[entryId])
-		board = boardcontents_template % ("Sample board @ 10.0.1."+str(self.server.vessel_id) + ".",entries)
+		board = boardcontents_template % ("Sample board @ 10.0.1."+str(self.server.vessel_id) + ". Leader : 10.1.0."+str(self.server.leader_id) + ", my random number : " +str(self.server.random),entries)
 		return board
 
 
