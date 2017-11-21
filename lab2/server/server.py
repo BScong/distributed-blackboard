@@ -10,6 +10,8 @@
 from BaseHTTPServer import HTTPServer, BaseHTTPRequestHandler # Socket specifically designed to handle HTTP requests
 import sys # Retrieve arguments
 import os # Paths to HTML files
+import ast
+import random
 from urlparse import parse_qs # Parse POST data
 from httplib import HTTPConnection # Create a HTTP connection, as a client (for POST requests to the other vessels)
 from urllib import urlencode # Encode POST content into the HTTP header
@@ -49,11 +51,20 @@ class BlackboardServer(HTTPServer):
 		# The list of other vessels
 		self.vessels = vessel_list
 		# The leader id
-		self.leader_id = 3
+		self.leader_id = -1
 		# Random number generated
-		self.random = 548
+		self.random = random.randint(0,1000)
 
-		self.neighbor_id = (self.vessel_id+1)%len(vessel_list)
+		# Neighbor in the ring
+		number_of_vessels=len(vessel_list)
+	 	self.neighbor_id = ((self.vessel_id)%number_of_vessels)+1
+
+	 	#Starting Leader Election
+		thread = Thread(target=self.start_leader_election )
+		# We kill the process if we kill the server
+		thread.daemon = True
+		# We start the thread
+		thread.start()
 
 #------------------------------------------------------------------------------------------------------
 	# We add a value received to the store - This function is only used by the leader
@@ -152,11 +163,30 @@ class BlackboardServer(HTTPServer):
 			print("Problem occured with " + leader_ip + " : Unable to join after multiple attempts.")
 		
 #------------------------------------------------------------------------------------------------------
+	def start_leader_election (self):
+		time.sleep(1)
+		data_gathering={}
+		data_gathering[self.vessel_id]=self.random
+	  	#self.current_key+=1
+		print "trying to contact"+str(self.neighbor_id)	
+		self.contact_vessel("10.1.0."+str(self.neighbor_id), "/election", "ELE", self.vessel_id, data_gathering)
 
 
-
-
-
+#------------------------------------------------------------------------------------------------------
+	def end_leader_election (self, parsed_value):
+		parsed_value=str(parsed_value)
+		time.sleep(5)
+		data_gathering=ast.literal_eval(parsed_value)#  Convert a string to a dictionnary
+		leader_id=0
+		for key in data_gathering :
+			if data_gathering[key] > leader_id :
+				leader_id=data_gathering[key]
+				leader_id=key
+		self.leader_id=leader_id#find the key of the highest value
+		print ("Choosing the leader ",self.leader_id)
+		#I start warning my neighbors about my choice	
+		self.contact_vessel("10.1.0."+str(self.neighbor_id), "/election", "COO", self.vessel_id,self.leader_id)
+#------------------------------------------------------------------------------------------------------
 
 
 #------------------------------------------------------------------------------------------------------
@@ -339,7 +369,46 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 
 	def do_POST_election(self, parsed):
 		# POST ELECTION LOGIC
-		pass
+		if self.path=="/election" and "action" in parsed and parsed['action'][0] == "ELE" and str(parsed['key'][0])!=str(self.server.vessel_id):
+			print("Data request received, forwarding.")
+			data_gathering=ast.literal_eval(parsed['value'][0])#  Convert a string to a dictionnary
+			data_gathering[self.server.vessel_id]=self.server.random#int(float(self.server.random))
+			
+			thread = Thread(target=self.server.contact_vessel,args=("10.1.0."+str(self.server.neighbor_id),"/election","ELE",parsed['key'][0],data_gathering ))
+			thread.daemon = True
+			thread.start()
+			self.set_HTTP_headers(200)
+				
+		elif self.path=="/election" and "action" in parsed and parsed['action'][0] == "ELE" and str(parsed['key'][0])==str(self.server.vessel_id):
+			print( "[DONE]Completed gathering data turn.")	
+			thread = Thread(target=self.server.end_leader_election,args=(parsed['value'][0],))
+			thread.daemon = True
+			thread.start()
+			
+			self.set_HTTP_headers(200)
+
+		elif self.path=="/election" and "action" in parsed and parsed['action'][0] == "COO" and str(parsed['key'][0])!=str(self.server.vessel_id):
+			if self.server.leader_id==-1:
+				print "Error, not ready to choose a leader"
+				self.set_HTTP_headers(200)
+			elif str(self.server.leader_id)!=parsed['value'][0] :
+				print "Error while choosing the leader"
+				print self.server.leader_id 
+				print parsed['value'][0] 
+				self.set_HTTP_headers(400)
+			else :
+				print('OK')
+				self.set_HTTP_headers(200)
+		
+			thread = Thread(target=self.server.contact_vessel,args=("10.1.0."+str(self.server.neighbor_id),"/election","COO",parsed['key'][0],parsed['value'][0] ))
+			thread.daemon = True
+			thread.start()
+
+		elif self.path=="/election" and "action" in parsed and parsed['action'][0] == "COO" and str(parsed['key'][0])==str(self.server.vessel_id):
+			print("[DONE]End of Leader Election: LEADER",self.server.leader_id)
+			self.set_HTTP_headers(200)
+		else:
+			self.set_HTTP_headers(200)
 
 	# Extracting parameters from the parsed structure
 	def get_entries_parameters(self, params):
