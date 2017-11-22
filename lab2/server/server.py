@@ -175,14 +175,14 @@ class BlackboardServer(HTTPServer):
 #------------------------------------------------------------------------------------------------------
 	def end_leader_election (self, parsed_value):
 		parsed_value=str(parsed_value)
-		time.sleep(5)
 		data_gathering=ast.literal_eval(parsed_value)#  Convert a string to a dictionnary
-		leader_id=0
+		random_leader=0
+		key_leader=0
 		for key in data_gathering :
-			if data_gathering[key] > leader_id :
-				leader_id=data_gathering[key]
-				leader_id=key
-		self.leader_id=leader_id#find the key of the highest value
+			if data_gathering[key] > random_leader :
+				random_leader=data_gathering[key]
+				key_leader=key
+		self.leader_id=key_leader
 		print ("Choosing the leader ",self.leader_id)
 		#I start warning my neighbors about my choice	
 		self.contact_vessel("10.1.0."+str(self.neighbor_id), "/election", "COO", self.vessel_id,self.leader_id)
