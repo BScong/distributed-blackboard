@@ -81,6 +81,24 @@ class BlackboardServer(HTTPServer):
 		# we update the current key
 		if key > self.current_key:
 			self.current_key = key
+#------------------------------------------------------------------------------------------------------
+	# Sorting algorithm to re-order store
+	def sort_store(self):
+		store_seq_num = {}
+		for key in self.store:
+			entry = self.store[key]
+			if entry['seq'] not in store_seq_num:
+				store_seq_num[entry['seq']]=[]
+			details = {id:key,seq:entry['seq'],node:entry['node'],msg:entry['msg']}
+			store_seq_num[entry['seq']].append(details)
+
+		current_key = 0
+		consistent_store = {}
+		for key in sorted(store_seq_num.keys()):
+			for entry in sorted(store_seq_num[key], key=lambda i:i['node']):
+
+
+
 
 #------------------------------------------------------------------------------------------------------
 # Contact a specific vessel with a set of variables to transmit to it
@@ -248,6 +266,27 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 
 		else:
 			self.set_HTTP_headers(400)
+
+	# Vessel POST Logic (Task 1 - propagate version)
+	def do_POST_entries_vessel(self, action, key, value, propagate):
+		if action == "ADD" : # Entry added by another server
+			print("Adding entry")
+			key = self.server.add_value_to_store(value) 
+		elif action == "MOD" :
+			print("Modifying entry")
+			self.server.modify_value_in_store(key,value) 
+		elif action == "DEL" :
+			print("Deleting entry")
+			self.server.delete_value_in_store(key)
+		# If we want to propagate the request to other vessels
+		if propagate:
+			# do_POST send the message only when the function finishes
+			# We must then create threads if we want to do some heavy computation
+			thread = Thread(target=self.server.propagate_value_to_vessels,args=("/entries", action, key, value) )
+			# We kill the process if we kill the server
+			thread.daemon = True
+			# We start the thread
+			thread.start() 
 
 	# Extracting parameters from the parsed structure
 	def get_entries_parameters(self, params):
