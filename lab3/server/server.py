@@ -89,16 +89,17 @@ class BlackboardServer(HTTPServer):
 			entry = self.store[key]
 			if entry['seq'] not in store_seq_num:
 				store_seq_num[entry['seq']]=[]
-			details = {id:key,seq:entry['seq'],node:entry['node'],msg:entry['msg']}
+			details = {'seq':entry['seq'],'node':entry['node'],'msg':entry['msg']}
 			store_seq_num[entry['seq']].append(details)
 
-		current_key = 0
+		current_key = -1
 		consistent_store = {}
 		for key in sorted(store_seq_num.keys()):
-			for entry in sorted(store_seq_num[key], key=lambda i:i['node']):
-
-
-
+			for entry in sorted(store_seq_num[key], key=lambda i:i['node'], reverse=True):
+				current_key+=1
+				consistent_store[current_key]=entry	
+		self.current_key=current_key
+		self.store = consistent_store
 
 #------------------------------------------------------------------------------------------------------
 # Contact a specific vessel with a set of variables to transmit to it
@@ -219,7 +220,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 	def generate_entries(self):
 		entries = ""
 		for entryId in self.server.store.keys():
-			entries += entry_template % ("entries/"+str(entryId),entryId,self.server.store[entryId])
+			entries += entry_template % ("entries/"+str(entryId),entryId,self.server.store[entryId]['msg'])
 		board = boardcontents_template % ("Sample board @ 10.0.1."+str(self.server.vessel_id) + ". ",entries)
 		return board
 
