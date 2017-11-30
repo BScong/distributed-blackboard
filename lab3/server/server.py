@@ -50,21 +50,7 @@ class BlackboardServer(HTTPServer):
 		self.vessel_id = vessel_id #"10.1.0."+vessel_id
 		# The list of other vessels
 		self.vessels = vessel_list
-		# The leader id
-		self.leader_id = -1
-		# Random number generated
-		self.random = random.randint(0,1000)
 
-		# Neighbor in the ring
-		number_of_vessels=len(vessel_list)
-	 	self.neighbor_id = ((self.vessel_id)%number_of_vessels)+1
-
-	 	#Starting Leader Election
-		thread = Thread(target=self.start_leader_election )
-		# We kill the process if we kill the server
-		thread.daemon = True
-		# We start the thread
-		thread.start()
 
 #------------------------------------------------------------------------------------------------------
 	# We add a value received to the store - This function is only used by the leader
@@ -254,7 +240,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		entries = ""
 		for entryId in self.server.store.keys():
 			entries += entry_template % ("entries/"+str(entryId),entryId,self.server.store[entryId])
-		board = boardcontents_template % ("Sample board @ 10.0.1."+str(self.server.vessel_id) + ". Leader : 10.1.0."+str(self.server.leader_id) + ", my random number : " +str(self.server.random),entries)
+		board = boardcontents_template % ("Sample board @ 10.0.1."+str(self.server.vessel_id) + ". ",entries)
 		return board
 
 
@@ -296,20 +282,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		if isValid:
 			self.set_HTTP_headers(200)
 
-			# self.do_POST_entries_vessel(action,key,value,propagate) # This was used in propagate version (task 1)
-			
-			if self.server.vessel_id == self.server.leader_id : # If I am the leader
-				self.do_POST_entries_leader(action, key, value) # Directly do the action
-			elif not propagate : # If the request comes from the leader
-				self.do_POST_entries_slave(action, key, value)
-			else: # We forward the request we received to the leader
-				# do_POST send the message only when the function finishes
-				# We must then create threads if we want to do some heavy computation
-				thread = Thread(target=self.server.forward_request_to_leader,args=("/entries", action, key, value) )
-				# We kill the process if we kill the server
-				thread.daemon = True
-				# We start the thread
-				thread.start()
+			self.do_POST_entries_vessel(action,key,value,propagate) # This was used in propagate version (task 1)
 
 		else:
 			self.set_HTTP_headers(400)
