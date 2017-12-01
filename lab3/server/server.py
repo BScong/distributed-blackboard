@@ -276,13 +276,17 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 			print("Adding entry")
 			if propagate:#self case
 				store_item = {"seq":self.server.logical_clock,"node":self.server.vessel_id,"msg":value}
+				self.server.add_value_to_store(store_item)
+				print(self.server.store)
+				self.server.logical_clock+=1
 			else:# entry from another server
-				
-				value = ast.literal_eval(key)
-				#store_item = {"seq":key['seq'],"node":key['node'],"msg":value}
+				key = ast.literal_eval(key)
 				store_item = {"seq":key['seq'], "node":key['node'],"msg":value}
-			self.server.add_value_to_store(store_item)
-
+				self.server.add_value_to_store(store_item)
+				print(self.server.store)
+				self.server.sort_store()
+				self.server.logical_clock=max(self.server.logical_clock,key['seq'])+1
+			
 		elif action == "MOD" :
 			print("Modifying entry")
 			self.server.modify_value_in_store(key,value) 
@@ -293,7 +297,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		if propagate:
 			# do_POST send the message only when the function finishes
 			# We must then create threads if we want to do some heavy computation
-			key = {"seq":self.server.logical_clock, "node":self.server.vessel_id}
+			key = {"seq":store_item['seq'], "node":store_item['node']}
 
 			thread = Thread(target=self.server.propagate_value_to_vessels,args=("/entries", action, key, value) )
 			# We kill the process if we kill the server
@@ -308,10 +312,11 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		if "action" in params: # Propagate cases
 			propagate = False
 			action = params['action'][0]
-			key = int(params['key'][0]) if "key" in params else ""
+			key = params['key'][0] if "key" in params else ""
 			value = params['value'][0] if "value" in params else ""
 		else: # Self cases
-			key = int(self.path.replace("/entries/","")) if "/entries/" in self.path else -1
+			#key = int(self.path.replace("/entries/","")) if "/entries/" in self.path else -1
+			key = ""
 			value = params['entry'][0] if "entry" in params else ""
 			if "delete" in params and params['delete'][0]=='1':
 				action = "DEL"

@@ -21,7 +21,7 @@ def sort_store(store):
 
 store={
 	5:{'seq':1,'node':1,'msg':"2"},
-	4:{'seq':1,'node':3,'msg':"1"},
+	4:{'seq':1,'node':2,'msg':"1"},
 	2:{'seq':2,'node':1,'msg':"3"},
 	3:{'seq':3,'node':1,'msg':"4"},
 	1:{'seq':4,'node':1,'msg':"6"},
