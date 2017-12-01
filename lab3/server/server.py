@@ -55,11 +55,11 @@ class BlackboardServer(HTTPServer):
 		# History
 		self.history = {}
 		# History of deleted
-		self.history_deleted = {}
+		self.history_deleted = set()
 		# Updates to perform
-		self.updates = {}
+		self.updates = {} # key = (clock, node), value = msg
 		# Deletes to perform
-		self.deletes = {}
+		self.deletes = set()
 
 
 #------------------------------------------------------------------------------------------------------
@@ -120,10 +120,32 @@ class BlackboardServer(HTTPServer):
 		print(self.history)
 
 	def perform_updates(self):
-		pass
+		self.update_history()
+		to_delete=[]
+		for key in self.updates:
+			if key in self.history:
+				value = {"seq":key[0], "node":key[1], "msg":self.updates[key]}
+				self.store[self.history[key]]=value
+				to_delete.append(key)
+			elif key in self.history_deleted:
+				to_delete.append(key)
+		for key in to_delete:
+			del self.updates[key]
+
 
 	def perform_deletes(self):
-		pass
+		self.update_history()
+		to_delete=[]
+		for key in self.deletes:
+			if key in self.history:
+				del self.store[self.history[key]]
+				del self.history[key]
+				self.history_deleted.add(key)
+				to_delete.append(key)
+			elif key in self.history_deleted:
+				to_delete.append(key)
+		for key in to_delete:
+			self.deletes.remove(key)
 
 #------------------------------------------------------------------------------------------------------
 # Contact a specific vessel with a set of variables to transmit to it
@@ -294,6 +316,9 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 
 	# Vessel POST Logic (Task 1 - propagate version)
 	def do_POST_entries_vessel(self, action, key, value, propagate):
+		if not propagate:
+			key = ast.literal_eval(key) # key parsing
+
 		if action == "ADD" : # Entry added by another server
 			print("Adding entry")
 			if propagate:#self case
@@ -301,8 +326,8 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 				self.server.add_value_to_store(store_item)
 				print(self.server.store)
 				self.server.logical_clock+=1
+				key = {"seq":store_item['seq'], "node":store_item['node']}
 			else:# entry from another server
-				key = ast.literal_eval(key)
 				store_item = {"seq":key['seq'], "node":key['node'],"msg":value}
 				self.server.add_value_to_store(store_item)
 				print(self.server.store)
@@ -311,15 +336,18 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 			
 		elif action == "MOD" :
 			print("Modifying entry")
-			self.server.modify_value_in_store(key,value) 
+			self.server.updates[(key['seq'],key['node'])]=value
+			self.server.perform_updates()
+			#self.server.modify_value_in_store(key,value) 
 		elif action == "DEL" :
 			print("Deleting entry")
-			self.server.delete_value_in_store(key)
+			self.server.deletes.add((key['seq'],key['node']))
+			self.server.perform_deletes()
+			#self.server.delete_value_in_store(key)
 		# If we want to propagate the request to other vessels
 		if propagate:
 			# do_POST send the message only when the function finishes
 			# We must then create threads if we want to do some heavy computation
-			key = {"seq":store_item['seq'], "node":store_item['node']}
 
 			thread = Thread(target=self.server.propagate_value_to_vessels,args=("/entries", action, key, value) )
 			# We kill the process if we kill the server
@@ -337,8 +365,10 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 			key = params['key'][0] if "key" in params else ""
 			value = params['value'][0] if "value" in params else ""
 		else: # Self cases
-			#key = int(self.path.replace("/entries/","")) if "/entries/" in self.path else -1
-			key = ""
+			key = int(self.path.replace("/entries/","")) if "/entries/" in self.path else -1
+			if key != -1:
+				data = self.server.store[key]
+				key = {'seq':data['seq'],'node':data['node']}
 			value = params['entry'][0] if "entry" in params else ""
 			if "delete" in params and params['delete'][0]=='1':
 				action = "DEL"
