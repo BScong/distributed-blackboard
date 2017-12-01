@@ -50,6 +50,8 @@ class BlackboardServer(HTTPServer):
 		self.vessel_id = vessel_id #"10.1.0."+vessel_id
 		# The list of other vessels
 		self.vessels = vessel_list
+		# Logical clock
+		self.logical_clock = 0
 
 
 #------------------------------------------------------------------------------------------------------
@@ -272,7 +274,15 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 	def do_POST_entries_vessel(self, action, key, value, propagate):
 		if action == "ADD" : # Entry added by another server
 			print("Adding entry")
-			key = self.server.add_value_to_store(value) 
+			if propagate:#self case
+				store_item = {"seq":self.server.logical_clock,"node":self.server.vessel_id,"msg":value}
+			else:# entry from another server
+				
+				value = ast.literal_eval(key)
+				#store_item = {"seq":key['seq'],"node":key['node'],"msg":value}
+				store_item = {"seq":key['seq'], "node":key['node'],"msg":value}
+			self.server.add_value_to_store(store_item)
+
 		elif action == "MOD" :
 			print("Modifying entry")
 			self.server.modify_value_in_store(key,value) 
@@ -283,6 +293,8 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		if propagate:
 			# do_POST send the message only when the function finishes
 			# We must then create threads if we want to do some heavy computation
+			key = {"seq":self.server.logical_clock, "node":self.server.vessel_id}
+
 			thread = Thread(target=self.server.propagate_value_to_vessels,args=("/entries", action, key, value) )
 			# We kill the process if we kill the server
 			thread.daemon = True
