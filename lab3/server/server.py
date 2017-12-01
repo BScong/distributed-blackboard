@@ -52,6 +52,14 @@ class BlackboardServer(HTTPServer):
 		self.vessels = vessel_list
 		# Logical clock
 		self.logical_clock = 0
+		# History
+		self.history = {}
+		# History of deleted
+		self.history_deleted = {}
+		# Updates to perform
+		self.updates = {}
+		# Deletes to perform
+		self.deletes = {}
 
 
 #------------------------------------------------------------------------------------------------------
@@ -102,6 +110,20 @@ class BlackboardServer(HTTPServer):
 				consistent_store[current_key]=entry	
 		self.current_key=current_key
 		self.store = consistent_store
+		self.update_history()
+
+	def update_history(self):
+		self.history={}
+		for key in self.store:
+			entry=self.store[key]
+			self.history[(entry['seq'],entry['node'])]=key
+		print(self.history)
+
+	def perform_updates(self):
+		pass
+
+	def perform_deletes(self):
+		pass
 
 #------------------------------------------------------------------------------------------------------
 # Contact a specific vessel with a set of variables to transmit to it
