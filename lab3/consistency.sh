@@ -1,4 +1,5 @@
-for i in `seq 1 20`; do
-curl -d 'entry=server1-number'${i} -X 'POST' 'http://10.1.0.1/entries'
-curl -d 'entry=server2-number'${i} -X 'POST' 'http://10.1.0.2/entries'
+for j in `seq 1 50`; do
+for i in `seq 1 8`; do
+curl -d 'entry=server'${i}'-number'${j} -X 'POST' 'http://10.1.0.'${i}'/entries'
+done
 done

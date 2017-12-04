@@ -117,7 +117,7 @@ class BlackboardServer(HTTPServer):
 		for key in self.store:
 			entry=self.store[key]
 			self.history[(entry['seq'],entry['node'])]=key
-		print(self.history)
+		#print(self.history)
 
 	def perform_updates(self):
 		self.update_history()
@@ -318,7 +318,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 	def do_POST_entries_vessel(self, action, key, value, propagate):
 		if not propagate:
 			key = ast.literal_eval(key) # key parsing
-
+		start = time.time()
 		if action == "ADD" : # Entry added by another server
 			print("Adding entry")
 			if propagate:#self case
@@ -345,6 +345,8 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 			self.server.perform_deletes()
 			#self.server.delete_value_in_store(key)
 		# If we want to propagate the request to other vessels
+		end = time.time()
+		print(str(len(self.server.store))+" messages - Time elapsed : " + str(end - start))
 		if propagate:
 			# do_POST send the message only when the function finishes
 			# We must then create threads if we want to do some heavy computation
