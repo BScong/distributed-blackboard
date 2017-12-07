@@ -164,7 +164,7 @@ class BlackboardServer(HTTPServer):
 		
 #------------------------------------------------------------------------------------------------------
 	def start_leader_election (self):
-		time.sleep(1)
+		time.sleep(10)
 		data_gathering={}
 		data_gathering[self.vessel_id]=self.random
 	  	#self.current_key+=1
@@ -283,6 +283,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 	
 	# POST Logic for entries (slave/leader)
 	def do_POST_entries(self, parsed):
+		start = time.time()
 		# Fetch parameters
 		action, key, value, propagate = self.get_entries_parameters(parsed)
 		# action is in ["ADD","DEL","MOD","SET"].
@@ -313,6 +314,8 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 
 		else:
 			self.set_HTTP_headers(400)
+		end = time.time()
+		print(str(len(self.server.store))+" messages - Time elapsed : " + str(end - start))
 
 	# Specific POST Logic for leader (centralized version)
 	def do_POST_entries_leader(self, action, key, value):
