@@ -43,7 +43,7 @@ class Lab1Topology( Topo ):
 		# For each region
 		for regionId in range(0, nbOfRegions):
 			# we create a regional switch
-			switches.append(self.addSwitch("regSwitch%d" % regionId))
+			switches.append(self.addSwitch("r%d" % regionId))
 			# we add servers/vessels in that region, with a fixed IP
 			for serverId in range(0, nbOfServersPerRegion):
 				# serverId is a regional Id, we want a global one
