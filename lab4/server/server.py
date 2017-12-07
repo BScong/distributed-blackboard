@@ -54,10 +54,20 @@ class BlackboardServer(HTTPServer):
 		self.count_votes = 0
 
 		# vectors
-		self.vectors_votes = [[] for i in range(len(self.vessel))]
+		self.vectors_votes = [[] for i in range(len(self.vessels))]
 		self.count_vectors = 0
 
 		self.results_vector = []
+
+		#state of the general
+		self.honest=False
+		#action chosen
+		self.action=""
+
+		#byzantine parameters
+		self.no_loyal=3
+		self.no_total=4
+		self.on_tie="True"
 
 		# Random number generated
 		self.random = random.randint(0,1000)
@@ -118,6 +128,26 @@ class BlackboardServer(HTTPServer):
 				if success : retry_list.remove(vessel)
 		if len(retry_list)>0:
 			print("Problem occured with " + ", ".join(retry_list) + " : Unable to connect after multiple attempts.")
+
+	def propagate_byzantine_action(self, path, action, key, value):
+		retry_list = [] # we will store the vessels without success
+		# We iterate through the vessel list
+		for vessel in self.vessels:
+			# We should not send it to our own IP, or we would create an infinite loop of updates
+			if vessel != ("10.1.0.%s" % self.vessel_id):
+				success = self.contact_vessel(vessel, path, action, key, value[int(vessel[7:])-1])
+				if not success:
+					retry_list.append(vessel)
+
+		# for the vessels who failed, we retry
+		try_count = 0
+		while len(retry_list)>0 and try_count < 15:
+			try_count += 1
+			for vessel in retry_list:
+				success = self.contact_vessel(vessel, path, action, key, value[int(vessel[7:])-1])
+				if success : retry_list.remove(vessel)
+		if len(retry_list)>0:
+			print("Problem occured with " + ", ".join(retry_list) + " : Unable to connect after multiple attempts.")
 		
 #------------------------------------------------------------------------------------------------------
 	#Compute byzantine votes for round 1, by trying to create
@@ -129,7 +159,7 @@ class BlackboardServer(HTTPServer):
 	#output:
 	#	A list with votes to send to the loyal nodes
 	#	in the form [True,False,True,.....]
-	def compute_byzantine_vote_round1(no_loyal,no_total,on_tie):
+	def compute_byzantine_vote_round1(self, no_loyal,no_total,on_tie):
 
 	  result_vote = []
 	  for i in range(0,no_loyal):
@@ -149,7 +179,7 @@ class BlackboardServer(HTTPServer):
 	#	A list where every element is a the vector that the 
 	#	byzantine node will send to every one of the loyal ones
 	#	in the form [[True,...],[False,...],...]
-	def compute_byzantine_vote_round2(no_loyal,no_total,on_tie):
+	def compute_byzantine_vote_round2(self, no_loyal,no_total,on_tie):
 	  
 	  result_vectors=[]
 	  for i in range(0,no_loyal):
@@ -158,6 +188,26 @@ class BlackboardServer(HTTPServer):
 	    else:
 	      result_vectors.append([not on_tie]*no_total)
 	  return result_vectors
+
+	#convert True/False values to attack/retreat
+	def convert_result_vote_round1 (self, result_vote):
+		convert_result=result_vote[:]
+		for i in range(len(result_vote)):
+			if result_vote[i]==True:
+				convert_result[i]="attack"
+			else:
+				convert_result[i]="retreat"
+		return convert_result
+
+	def convert_result_vote_round2 (self, result_vote):
+		convert_result=result_vote[:]
+		for i in range(len(result_vote)):
+			for j in range(len(result_vote[i])):
+				if result_vote[i][j]==True:
+					convert_result[i][j]="attack"
+				else:
+					convert_result[i][j]="retreat"
+		return convert_result
 
 #------------------------------------------------------------------------------------------------------
 #------------------------------------------------------------------------------------------------------
@@ -240,47 +290,96 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		print(parsed)
 
 		# Check if the path is correct
-		valid_path_entries = True if "/entries" in self.path else False
-		valid_path_election = True if "/election" in self.path else False
+		valid_path_entries = True if "/vote/attack" == self.path\
+		or "/vote/retreat" == self.path\
+		or "/vote/byzantine" == self.path else False
 		
-		if valid_path_entries:
-			self.do_POST_entries(parsed)
-		elif valid_path_election:
-			self.do_POST_election(parsed)
+		if valid_path_entries and "/vote/byzantine" not in self.path :
+			self.server.honest=False
+			self.do_POST_vote_honest_round1(self.path[6:])
+		elif valid_path_entries:
+			self.server.honest=True
+			self.do_POST_vote_byzantine_round1(self.path[6:])
 		else:
 			self.set_HTTP_headers(400)
 #------------------------------------------------------------------------------------------------------
 # POST Logic
 #------------------------------------------------------------------------------------------------------
+	def do_POST_vote_honest_round1(self, value):
+		print("Honest")
+		#Set the value of the vote as an action
+		self.server.action=value
+
+		self.server.count_votes+=1
+		self.server.votes[self.server.vessel_id-1]=value
+
+		#Propagation the chosen action
+		#self.server.propagate_value_to_vessels("/vote/round1", "", self.server.vessel_id, str(self.server.action))
+		thread = Thread(target=self.server.propagate_value_to_vessels,args=("/vote/round1", "", self.server.vessel_id, str(self.server.action)) )
+		# We kill the process if we kill the server
+		thread.daemon = True
+		# We start the thread
+		thread.start()
+
+
+	def do_POST_vote_byzantine_round1(self,value):
+		#Set the value of the vote as an action
+		byzantine_action=self.server.compute_byzantine_vote_round1(self.server.no_loyal,self.server.no_total,self.server.on_tie)
+		byzantine_action=self.server.convert_result_vote_round1 (byzantine_action)
+		self.server.votes[self.server.vessel_id-1]=byzantine_action[self.server.vessel_id-1]
+		self.server.count_votes+=1
+
+		#Propagation of different value to each node
+		#self.server.propagate_byzantine_action("/vote/round1", "", self.server.vessel_id, byzantine_action)
+		thread = Thread(target=self.server.propagate_byzantine_action,args=("/vote/round1", "", self.server.vessel_id, byzantine_action) )
+		# We kill the process if we kill the server
+		thread.daemon = True
+		# We start the thread
+		thread.start()
+
 	def do_POST_vote_honest_round2(self, parsed):
 		action, key, value = self.get_entries_parameters(parsed)
-		self.votes[key]=value
-		self.count_votes+=1
+		self.server.votes[key-1]=value
+		self.server.count_votes+=1
 
-		if self.count_votes==len(self.server.vessels):
-			self.vectors_votes[self.server.vessel_id-1]=self.votes
+		if self.server.count_votes==len(self.server.vessels):
+			self.vectors_votes[self.server.vessel_id-1]=self.server.votes
+			self.server.count_vectors+=1
 			# propagate
-			thread = Thread(target=self.server.propagate_value_to_vessels,args=("/vote/round2", "", self.server.vessel_id, self.votes) )
+			thread = Thread(target=self.server.propagate_value_to_vessels,args=("/vote/round2", "", self.server.vessel_id, self.server.votes) )
 			# We kill the process if we kill the server
 			thread.daemon = True
 			# We start the thread
 			thread.start()
 
 	def do_POST_vote_byzantine_round2(self, parsed):
-		pass
+		self.count_votes+=1
+
+		if self.server.count_votes==len(self.server.vessels):
+			value = self.server.compute_byzantine_vote_round2(self.server.no_loyal,self.server.no_total,self.server.on_tie)
+			value = self.server.convert_result_vote_round2 (value)
+			self.server.vectors_votes[self.server.vessel_id-1]=value[self.server.vessel_id-1]
+			self.server.count_vectors+=1
+
+			#propagate_byzantine_action("/vote/round2","",self.server.vessel_id,value)
+			thread = Thread(target=self.server.propagate_byzantine_action,args=("/vote/round2","",self.server.vessel_id,value) )
+			# We kill the process if we kill the server
+			thread.daemon = True
+			# We start the thread
+			thread.start()
 
 
 	def do_POST_vote_end_round2(self,parsed):
 		action, key, value = self.get_entries_parameters(parsed)
-		self.vectors_votes[key]=value
-		self.count_vectors += 1
-		if self.count_vectors == len(self.server.vessels):
+		self.server.vectors_votes[key-1]=value
+		self.server.count_vectors += 1
+		if self.server.count_vectors == len(self.server.vessels):
 			result_vector = []
 
 			# Fill a results vector
 			for i in range(len(self.server.vessels)):
 				count = {"attack":0,"retreat":0,"unknown":0}
-				for vect in self.vectors_votes:
+				for vect in self.server.vectors_votes:
 					if vect[i]=="attack" or vect[i]=="retreat":
 						count[vect[i]]+=1
 					else:
@@ -289,12 +388,12 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 
 				
 
-			self.results_vector = result_vector
+			self.server.results_vector = result_vector
 			# compute result from the result_vector
 			count = {"attack":0,"retreat":0,"unknown":0}
 			for el in results_vector:
 				count[el]+=1
-			self.result = compute_vote(count)
+			self.server.result = compute_vote(count)
 
 	def compute_vote(count):
 		result = ""
