@@ -40,10 +40,6 @@ class BlackboardServer(HTTPServer):
 	def __init__(self, server_address, handler, vessel_id, vessel_list):
 	# We call the super init
 		HTTPServer.__init__(self,server_address, handler)
-		# we create the dictionary of values
-		self.store = {}
-		# We keep a variable of the next id to insert
-		self.current_key = -1
 		# our own ID (IP is 10.1.0.ID)
 		self.vessel_id = vessel_id #"10.1.0."+vessel_id
 		# The list of other vessels
@@ -67,10 +63,7 @@ class BlackboardServer(HTTPServer):
 		#byzantine parameters
 		self.no_loyal=3
 		self.no_total=4
-		self.on_tie="True"
-
-		# Random number generated
-		self.random = random.randint(0,1000)
+		self.on_tie=True
 
 		self.result = ""
 		
@@ -135,6 +128,7 @@ class BlackboardServer(HTTPServer):
 		for vessel in self.vessels:
 			# We should not send it to our own IP, or we would create an infinite loop of updates
 			if vessel != ("10.1.0.%s" % self.vessel_id):
+				#print(int(vessel[7:])-1)
 				success = self.contact_vessel(vessel, path, action, key, value[int(vessel[7:])-1])
 				if not success:
 					retry_list.append(vessel)
@@ -148,6 +142,22 @@ class BlackboardServer(HTTPServer):
 				if success : retry_list.remove(vessel)
 		if len(retry_list)>0:
 			print("Problem occured with " + ", ".join(retry_list) + " : Unable to connect after multiple attempts.")
+
+	def reset_votes(self):
+		# votes
+		self.votes = ["unknown" for i in range(len(self.vessels))]
+		self.count_votes = 0
+
+		# vectors
+		self.vectors_votes = [[] for i in range(len(self.vessels))]
+		self.count_vectors = 0
+
+		self.results_vector = []
+
+		#action chosen
+		self.action=""
+
+		self.result = ""
 		
 #------------------------------------------------------------------------------------------------------
 	#Compute byzantine votes for round 1, by trying to create
@@ -162,11 +172,12 @@ class BlackboardServer(HTTPServer):
 	def compute_byzantine_vote_round1(self, no_loyal,no_total,on_tie):
 
 	  result_vote = []
-	  for i in range(0,no_loyal):
+	  for i in range(0,no_total):
 	    if i%2==0:
 	      result_vote.append(not on_tie)
 	    else:
 	      result_vote.append(on_tie)
+	  print("Round 1 byz : " + str(result_vote))
 	  return result_vote
 
 	#Compute byzantine votes for round 2, trying to swing the decision
@@ -182,7 +193,7 @@ class BlackboardServer(HTTPServer):
 	def compute_byzantine_vote_round2(self, no_loyal,no_total,on_tie):
 	  
 	  result_vectors=[]
-	  for i in range(0,no_loyal):
+	  for i in range(0,no_total):
 	    if i%2==0:
 	      result_vectors.append([on_tie]*no_total)
 	    else:
@@ -242,7 +253,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 	# This function contains the logic executed when this server receives a GET request
 	# This function is called AUTOMATICALLY upon reception and is executed as a thread!
 	def do_GET(self):
-		print("Receiving a GET on path %s" % self.path)
+		#print("Receiving a GET on path %s" % self.path)
 		# Here, we should check which path was requested and call the right logic based on it
 		if self.path == "/vote/result":
 			self.do_GET_Result()
@@ -293,13 +304,24 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		valid_path_entries = True if "/vote/attack" == self.path\
 		or "/vote/retreat" == self.path\
 		or "/vote/byzantine" == self.path else False
+
+		if self.path=="/reset":
+			self.server.reset_votes()
 		
 		if valid_path_entries and "/vote/byzantine" not in self.path :
-			self.server.honest=False
+			self.set_HTTP_headers(200)
+			self.server.honest=True
 			self.do_POST_vote_honest_round1(self.path[6:])
 		elif valid_path_entries:
-			self.server.honest=True
+			self.set_HTTP_headers(200)
+			self.server.honest=False
 			self.do_POST_vote_byzantine_round1(self.path[6:])
+		elif self.path=="/vote/round1":
+			self.set_HTTP_headers(200)
+			self.do_POST_vote_round2(parsed)
+		elif self.path=="/vote/round2":
+			self.set_HTTP_headers(200)
+			self.do_POST_vote_end_round2(parsed)
 		else:
 			self.set_HTTP_headers(400)
 #------------------------------------------------------------------------------------------------------
@@ -337,65 +359,74 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		# We start the thread
 		thread.start()
 
-	def do_POST_vote_honest_round2(self, parsed):
+	def do_POST_vote_round2(self, parsed):
 		action, key, value = self.get_entries_parameters(parsed)
 		self.server.votes[key-1]=value
 		self.server.count_votes+=1
 
 		if self.server.count_votes==len(self.server.vessels):
-			self.vectors_votes[self.server.vessel_id-1]=self.server.votes
-			self.server.count_vectors+=1
-			# propagate
-			thread = Thread(target=self.server.propagate_value_to_vessels,args=("/vote/round2", "", self.server.vessel_id, self.server.votes) )
-			# We kill the process if we kill the server
-			thread.daemon = True
-			# We start the thread
-			thread.start()
+			if not self.server.honest:
+				value = self.server.compute_byzantine_vote_round2(self.server.no_loyal,self.server.no_total,self.server.on_tie)
+				value = self.server.convert_result_vote_round2 (value)
+				self.server.vectors_votes[self.server.vessel_id-1]=value[self.server.vessel_id-1]
+				self.server.count_vectors+=1
 
-	def do_POST_vote_byzantine_round2(self, parsed):
-		self.count_votes+=1
-
-		if self.server.count_votes==len(self.server.vessels):
-			value = self.server.compute_byzantine_vote_round2(self.server.no_loyal,self.server.no_total,self.server.on_tie)
-			value = self.server.convert_result_vote_round2 (value)
-			self.server.vectors_votes[self.server.vessel_id-1]=value[self.server.vessel_id-1]
-			self.server.count_vectors+=1
-
-			#propagate_byzantine_action("/vote/round2","",self.server.vessel_id,value)
-			thread = Thread(target=self.server.propagate_byzantine_action,args=("/vote/round2","",self.server.vessel_id,value) )
-			# We kill the process if we kill the server
-			thread.daemon = True
-			# We start the thread
-			thread.start()
-
+				#propagate_byzantine_action("/vote/round2","",self.server.vessel_id,value)
+				thread = Thread(target=self.server.propagate_byzantine_action,args=("/vote/round2","",self.server.vessel_id,value) )
+				# We kill the process if we kill the server
+				thread.daemon = True
+				# We start the thread
+				thread.start()
+			else:
+				self.server.vectors_votes[self.server.vessel_id-1]=self.server.votes
+				self.server.count_vectors+=1
+				# propagate
+				thread = Thread(target=self.server.propagate_value_to_vessels,args=("/vote/round2", "", self.server.vessel_id, self.server.votes) )
+				# We kill the process if we kill the server
+				thread.daemon = True
+				# We start the thread
+				thread.start()
 
 	def do_POST_vote_end_round2(self,parsed):
 		action, key, value = self.get_entries_parameters(parsed)
 		self.server.vectors_votes[key-1]=value
 		self.server.count_vectors += 1
+		print(self.server.count_vectors)
 		if self.server.count_vectors == len(self.server.vessels):
-			result_vector = []
+			print("End")
+			result_vector = ['' for i in range(len(self.server.vessels))]
 
 			# Fill a results vector
+			for i in range(len(self.server.vectors_votes)):
+				print(self.server.vectors_votes[i])
+				self.server.vectors_votes[i]=ast.literal_eval(str(self.server.vectors_votes[i]))
+				
 			for i in range(len(self.server.vessels)):
 				count = {"attack":0,"retreat":0,"unknown":0}
+				#print(self.server.vectors_votes)
+				#print(len(self.server.vectors_votes))
 				for vect in self.server.vectors_votes:
+					#print(vect)
+					#print(vect[i])
+					#print(type(vect[i]))
 					if vect[i]=="attack" or vect[i]=="retreat":
 						count[vect[i]]+=1
 					else:
 						count["unknown"]+=1
-				result_vote = self.compute_vote(count)
+				result_vector[i] = self.compute_vote(count)
 
 				
 
 			self.server.results_vector = result_vector
+			print(self.server.results_vector)
 			# compute result from the result_vector
 			count = {"attack":0,"retreat":0,"unknown":0}
-			for el in results_vector:
+			for el in self.server.results_vector:
 				count[el]+=1
-			self.server.result = compute_vote(count)
+			self.server.result = self.compute_vote(count)
+			print(self.server.result)
 
-	def compute_vote(count):
+	def compute_vote(self, count):
 		result = ""
 		if count["attack"]>count["retreat"] and count["attack"]>count["unknown"]:
 			result="attack"
@@ -408,162 +439,13 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 			result="unknown"
 		return result
 
-
-
-			#generate result
-
-	# POST Logic for entries (slave/leader)
-	def do_POST_entries(self, parsed):
-		start = time.time()
-		# Fetch parameters
-		action, key, value, propagate = self.get_entries_parameters(parsed)
-		# action is in ["ADD","DEL","MOD","SET"].
-		# We added the action "SET" that sets a value for a specific key
-		# propagate is true if the request comes from me.
-		# (If the request is received from someone else, then propagate is false)
-
-		# Validate parameters
-		isValid = self.are_parameters_valid(action, key, value)
-
-		if isValid:
-			self.set_HTTP_headers(200)
-
-			# self.do_POST_entries_vessel(action,key,value,propagate) # This was used in propagate version (task 1)
-			
-			if self.server.vessel_id == self.server.leader_id : # If I am the leader
-				self.do_POST_entries_leader(action, key, value) # Directly do the action
-			elif not propagate : # If the request comes from the leader
-				self.do_POST_entries_slave(action, key, value)
-			else: # We forward the request we received to the leader
-				# do_POST send the message only when the function finishes
-				# We must then create threads if we want to do some heavy computation
-				thread = Thread(target=self.server.forward_request_to_leader,args=("/entries", action, key, value) )
-				# We kill the process if we kill the server
-				thread.daemon = True
-				# We start the thread
-				thread.start()
-
-		else:
-			self.set_HTTP_headers(400)
-		end = time.time()
-		print(str(len(self.server.store))+" messages - Time elapsed : " + str(end - start))
-
-	# Specific POST Logic for leader (centralized version)
-	def do_POST_entries_leader(self, action, key, value):
-		if action == "ADD" : # Entry added by another server
-			print("Adding entry")
-			action="SET"
-			key = self.server.add_value_to_store(value) 
-		elif action == "MOD" :
-			print("Modifying entry")
-			action="SET"
-			self.server.modify_value_in_store(key,value) 
-		elif action == "DEL" :
-			print("Deleting entry")
-			self.server.delete_value_in_store(key) 
-
-		thread = Thread(target=self.server.propagate_value_to_vessels,args=("/entries", action, key, value) )
-		# We kill the process if we kill the server
-		thread.daemon = True
-		# We start the thread
-		thread.start()
-
-	# Slave POST Logic in centralized version
-	def do_POST_entries_slave(self, action, key, value):
-		if action == "SET" :
-			forward = False # but don't forward if the order is from the leader
-			print("Entry from leader received")
-			self.server.set_value_in_local_store(key, value)
-		elif action =="DEL": 
-			forward = False # but don't forward if the order is from the leader
-			print("Delete order from leader received")
-			self.server.delete_value_in_store(key)
-
-
-	# Vessel POST Logic (Task 1 - propagate version)
-	def do_POST_entries_vessel(self, action, key, value, propagate):
-		if action == "ADD" : # Entry added by another server
-			print("Adding entry")
-			key = self.server.add_value_to_store(value) 
-		elif action == "MOD" :
-			print("Modifying entry")
-			self.server.modify_value_in_store(key,value) 
-		elif action == "DEL" :
-			print("Deleting entry")
-			self.server.delete_value_in_store(key)
-		# If we want to propagate the request to other vessels
-		if propagate:
-			# do_POST send the message only when the function finishes
-			# We must then create threads if we want to do some heavy computation
-			thread = Thread(target=self.server.propagate_value_to_vessels,args=("/entries", action, key, value) )
-			# We kill the process if we kill the server
-			thread.daemon = True
-			# We start the thread
-			thread.start() 
-
-	def do_POST_election(self, parsed):
-		# POST ELECTION LOGIC
-		if self.path=="/election" and "action" in parsed and parsed['action'][0] == "ELE" and str(parsed['key'][0])!=str(self.server.vessel_id):
-			print("Data request received, forwarding.")
-			data_gathering=ast.literal_eval(parsed['value'][0])#  Convert a string to a dictionnary
-			data_gathering[self.server.vessel_id]=self.server.random#int(float(self.server.random))
-			
-			thread = Thread(target=self.server.contact_vessel,args=("10.1.0."+str(self.server.neighbor_id),"/election","ELE",parsed['key'][0],data_gathering ))
-			thread.daemon = True
-			thread.start()
-			self.set_HTTP_headers(200)
-				
-		elif self.path=="/election" and "action" in parsed and parsed['action'][0] == "ELE" and str(parsed['key'][0])==str(self.server.vessel_id):
-			print( "[DONE]Completed gathering data turn.")	
-			thread = Thread(target=self.server.end_leader_election,args=(parsed['value'][0],))
-			thread.daemon = True
-			thread.start()
-			
-			self.set_HTTP_headers(200)
-
-		elif self.path=="/election" and "action" in parsed and parsed['action'][0] == "COO" and str(parsed['key'][0])!=str(self.server.vessel_id):
-			if self.server.leader_id==-1:
-				print "Error, not ready to choose a leader"
-				self.set_HTTP_headers(200)
-			elif str(self.server.leader_id)!=parsed['value'][0] :
-				print "Error while choosing the leader"
-				print self.server.leader_id 
-				print parsed['value'][0] 
-				self.set_HTTP_headers(400)
-			else :
-				print('OK')
-				self.set_HTTP_headers(200)
-		
-			thread = Thread(target=self.server.contact_vessel,args=("10.1.0."+str(self.server.neighbor_id),"/election","COO",parsed['key'][0],parsed['value'][0] ))
-			thread.daemon = True
-			thread.start()
-
-		elif self.path=="/election" and "action" in parsed and parsed['action'][0] == "COO" and str(parsed['key'][0])==str(self.server.vessel_id):
-			print("[DONE]End of Leader Election: LEADER",self.server.leader_id)
-			self.set_HTTP_headers(200)
-		else:
-			self.set_HTTP_headers(200)
-
 	# Extracting parameters from the parsed structure
 	def get_entries_parameters(self, params):
-		action, key, value = "",-1,"",True
+		action, key, value = "",-1,""
 		key = int(params['key'][0]) if "key" in params else ""
 		value = params['value'][0] if "value" in params else ""
 
 		return action, key, value
-
-
-	# Test the parameters to see if they are valid (No incorrect values or incorrect combinations)
-	def are_parameters_valid(self, action, key, value):
-		if action=="ADD" and value!="":
-			return True
-		elif action == "DEL" and key!=-1:
-			return True
-		elif action in ["MOD","SET"] and key!=-1 and value!="":
-			return True
-		else:
-			return False
-
 
 #------------------------------------------------------------------------------------------------------
 
