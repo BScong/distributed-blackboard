@@ -270,7 +270,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		#produce the boardcontents part, 
 		#then construct the full page by combining all the parts ...
 
-		html_response = template + self.get_results()
+		html_response = template
 		
 		self.wfile.write(html_response)
 
