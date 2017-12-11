@@ -301,18 +301,18 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		print(parsed)
 
 		# Check if the path is correct
-		valid_path_entries = True if "/vote/attack" == self.path\
+		valid_path_vote = True if "/vote/attack" == self.path\
 		or "/vote/retreat" == self.path\
 		or "/vote/byzantine" == self.path else False
 
 		if self.path=="/reset":
 			self.server.reset_votes()
 		
-		if valid_path_entries and "/vote/byzantine" not in self.path :
+		if valid_path_vote and "/vote/byzantine" not in self.path :
 			self.set_HTTP_headers(200)
 			self.server.honest=True
 			self.do_POST_vote_honest_round1(self.path[6:])
-		elif valid_path_entries:
+		elif valid_path_vote:
 			self.set_HTTP_headers(200)
 			self.server.honest=False
 			self.do_POST_vote_byzantine_round1(self.path[6:])
@@ -343,6 +343,9 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		# We start the thread
 		thread.start()
 
+		if self.server.count_votes==len(self.server.vessels):
+			self.begin_round2()
+
 
 	def do_POST_vote_byzantine_round1(self,value):
 		#Set the value of the vote as an action
@@ -359,33 +362,43 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		# We start the thread
 		thread.start()
 
+		if self.server.count_votes==len(self.server.vessels):
+			self.begin_round2()
+
 	def do_POST_vote_round2(self, parsed):
 		action, key, value = self.get_entries_parameters(parsed)
 		self.server.votes[key-1]=value
 		self.server.count_votes+=1
 
 		if self.server.count_votes==len(self.server.vessels):
-			if not self.server.honest:
-				value = self.server.compute_byzantine_vote_round2(self.server.no_loyal,self.server.no_total,self.server.on_tie)
-				value = self.server.convert_result_vote_round2 (value)
-				self.server.vectors_votes[self.server.vessel_id-1]=value[self.server.vessel_id-1]
-				self.server.count_vectors+=1
+			self.begin_round2()
 
-				#propagate_byzantine_action("/vote/round2","",self.server.vessel_id,value)
-				thread = Thread(target=self.server.propagate_byzantine_action,args=("/vote/round2","",self.server.vessel_id,value) )
-				# We kill the process if we kill the server
-				thread.daemon = True
-				# We start the thread
-				thread.start()
-			else:
-				self.server.vectors_votes[self.server.vessel_id-1]=self.server.votes
-				self.server.count_vectors+=1
-				# propagate
-				thread = Thread(target=self.server.propagate_value_to_vessels,args=("/vote/round2", "", self.server.vessel_id, self.server.votes) )
-				# We kill the process if we kill the server
-				thread.daemon = True
-				# We start the thread
-				thread.start()
+	def begin_round2(self):
+		if not self.server.honest:
+			value = self.server.compute_byzantine_vote_round2(self.server.no_loyal,self.server.no_total,self.server.on_tie)
+			value = self.server.convert_result_vote_round2 (value)
+			self.server.vectors_votes[self.server.vessel_id-1]=value[self.server.vessel_id-1]
+			self.server.count_vectors+=1
+
+
+			#propagate_byzantine_action("/vote/round2","",self.server.vessel_id,value)
+			thread = Thread(target=self.server.propagate_byzantine_action,args=("/vote/round2","",self.server.vessel_id,value) )
+			# We kill the process if we kill the server
+			thread.daemon = True
+			# We start the thread
+			thread.start()
+		else:
+			self.server.vectors_votes[self.server.vessel_id-1]=self.server.votes
+			self.server.count_vectors+=1
+			# propagate
+			thread = Thread(target=self.server.propagate_value_to_vessels,args=("/vote/round2", "", self.server.vessel_id, self.server.votes) )
+			# We kill the process if we kill the server
+			thread.daemon = True
+			# We start the thread
+			thread.start()
+
+		if self.server.count_vectors == len(self.server.vessels):
+			self.end_vote()
 
 	def do_POST_vote_end_round2(self,parsed):
 		action, key, value = self.get_entries_parameters(parsed)
@@ -393,38 +406,41 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		self.server.count_vectors += 1
 		print(self.server.count_vectors)
 		if self.server.count_vectors == len(self.server.vessels):
-			print("End")
-			result_vector = ['' for i in range(len(self.server.vessels))]
+			self.end_vote()
 
-			# Fill a results vector
-			for i in range(len(self.server.vectors_votes)):
-				print(self.server.vectors_votes[i])
-				self.server.vectors_votes[i]=ast.literal_eval(str(self.server.vectors_votes[i]))
-				
-			for i in range(len(self.server.vessels)):
-				count = {"attack":0,"retreat":0,"unknown":0}
-				#print(self.server.vectors_votes)
-				#print(len(self.server.vectors_votes))
-				for vect in self.server.vectors_votes:
-					#print(vect)
-					#print(vect[i])
-					#print(type(vect[i]))
-					if vect[i]=="attack" or vect[i]=="retreat":
-						count[vect[i]]+=1
-					else:
-						count["unknown"]+=1
-				result_vector[i] = self.compute_vote(count)
+	def end_vote(self):
+		print("End")
+		result_vector = ['' for i in range(len(self.server.vessels))]
 
-				
-
-			self.server.results_vector = result_vector
-			print(self.server.results_vector)
-			# compute result from the result_vector
+		# Fill a results vector
+		for i in range(len(self.server.vectors_votes)):
+			print(self.server.vectors_votes[i])
+			self.server.vectors_votes[i]=ast.literal_eval(str(self.server.vectors_votes[i]))
+			
+		for i in range(len(self.server.vessels)):
 			count = {"attack":0,"retreat":0,"unknown":0}
-			for el in self.server.results_vector:
-				count[el]+=1
-			self.server.result = self.compute_vote(count)
-			print(self.server.result)
+			#print(self.server.vectors_votes)
+			#print(len(self.server.vectors_votes))
+			for vect in self.server.vectors_votes:
+				#print(vect)
+				#print(vect[i])
+				#print(type(vect[i]))
+				if vect[i]=="attack" or vect[i]=="retreat":
+					count[vect[i]]+=1
+				else:
+					count["unknown"]+=1
+			result_vector[i] = self.compute_vote(count)
+
+			
+
+		self.server.results_vector = result_vector
+		print(self.server.results_vector)
+		# compute result from the result_vector
+		count = {"attack":0,"retreat":0,"unknown":0}
+		for el in self.server.results_vector:
+			count[el]+=1
+		self.server.result = self.compute_vote(count)
+		print(self.server.result)
 
 	def compute_vote(self, count):
 		result = ""
